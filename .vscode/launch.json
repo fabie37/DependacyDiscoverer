@@ -8,10 +8,14 @@
             "name": "clang++ - Build and debug active file",
             "type": "cppdbg",
             "request": "launch",
-            "program": "${fileDirname}/${fileBasenameNoExtension}",
-            "args": [],
+            "program": "${workspaceFolder}/dependencyDiscoverer",
+            "args": [
+                "*.y",
+                "*.l",
+                "*.c"
+            ],
             "stopAtEntry": false,
-            "cwd": "${workspaceFolder}",
+            "cwd": "${workspaceFolder}/test/",
             "environment": [],
             "externalConsole": false,
             "MIMode": "gdb",

@@ -101,6 +101,7 @@
 #include <stdlib.h>
 #include <string.h>
 
+#include <condition_variable>
 #include <list>
 #include <mutex>
 #include <string>
@@ -108,6 +109,34 @@
 #include <unordered_map>
 #include <unordered_set>
 #include <vector>
+
+// thread safe thread tracker
+struct ThreadTracker {
+   private:
+    int t_count;
+    std::condition_variable cv;
+    std::mutex mutex;
+
+   public:
+    ThreadTracker(int t_count) {
+        this->t_count = t_count;
+    }
+
+    void signal_done() {
+        std::unique_lock<std::mutex> lock(this->mutex);
+        this->t_count--;
+        lock.unlock();
+        cv.notify_one();
+    }
+
+    void wait_done() {
+        std::unique_lock<std::mutex> lock(this->mutex);
+        while (this->t_count > 0) {
+            this->cv.wait(lock);
+        }
+        // continue with thread
+    }
+};
 
 // thread safe queue
 struct QueueSafe {
@@ -139,7 +168,11 @@ struct QueueSafe {
 
     std::string front() {
         std::unique_lock<std::mutex> lock(mutex);
-        return this->q.front();
+        if (this->q.empty() == true) {
+            return std::string("");
+        } else {
+            return this->q.front();
+        }
     }
 };
 
@@ -151,12 +184,12 @@ struct MapSafe {
 
    public:
     std::unordered_map<std::string, std::list<std::string>>::iterator find(std::string string) {
-        std::unique_lock<std::mutex> lock(mutex);
+        //std::unique_lock<std::mutex> lock(mutex);
         return this->map.find(string);
     }
 
     std::unordered_map<std::string, std::list<std::string>>::iterator end() {
-        std::unique_lock<std::mutex> lock(mutex);
+        //std::unique_lock<std::mutex> lock(mutex);
         return this->map.end();
     }
 
@@ -171,9 +204,42 @@ struct MapSafe {
     }
 };
 
+// Semaphore
+struct BinarySemaphore {
+   private:
+    int val;
+    bool dataReady;
+    std::condition_variable cv;
+    std::mutex mutex;
+
+   public:
+    BinarySemaphore() {
+        this->val = 1;
+    }
+
+    void wait() {
+        std::unique_lock<std::mutex> lock(mutex);
+        while (this->val <= 0) {
+            this->cv.wait(lock);
+        }
+        this->val--;
+    }
+
+    void signal() {
+        std::unique_lock<std::mutex> lock(mutex);
+        while (this->val > 0) {
+            this->cv.wait(lock);
+        }
+        this->val++;
+        lock.unlock();
+        this->cv.notify_one();
+    }
+};
+
 std::vector<std::string> dirs;
 MapSafe theTable;
 QueueSafe workQ;
+BinarySemaphore bs;
 
 std::string dirName(const char* c_str) {
     std::string s = c_str;  // s takes ownership of the string content by allocating memory for it
@@ -244,15 +310,18 @@ static void process(const char* file, std::list<std::string>* ll) {
         }
         *q = '\0';
         // 2bii. append file name to dependency list
+        //bs.wait();
         ll->push_back({name});
         // 2bii. if file name not already in table ...
         if (theTable.find(name) != theTable.end()) {
+            //bs.signal();
             continue;
         }
         // ... insert mapping from file name to empty list in table ...
         theTable.insert({name, {}});
         // ... append file name to workQ
         workQ.push_back(name);
+        //bs.signal();
     }
     // 3. close file
     fclose(fd);
@@ -291,6 +360,18 @@ static void printDependencies(std::unordered_set<std::string>* printed,
 int main(int argc, char* argv[]) {
     // 1. look up CPATH in environment
     char* cpath = getenv("CPATH");
+    char* crawlerthreads = getenv("CRAWLER_THREADS");
+    int number_of_threads;
+    if (crawlerthreads == NULL) {
+        number_of_threads = 2;
+    } else {
+        number_of_threads = std::stoi(crawlerthreads);
+    }
+
+    // init. setup threads, locks and condition variables
+    std::vector<std::thread> threads;
+    ThreadTracker tracker(number_of_threads);
+    BinarySemaphore threadlock;
 
     // determine the number of -Idir arguments
     int i;
@@ -339,17 +420,30 @@ int main(int argc, char* argv[]) {
     }
 
     // 4. for each file on the workQ
-    while (workQ.size() > 0) {
-        std::string filename = workQ.front();
-        workQ.pop_front();
+    for (int i = 0; i < number_of_threads; i++) {
+        threads.push_back(std::move(std::thread([tracker = &tracker, thread = &threadlock]() {
+            while (true) {
+                thread->wait();
+                if (workQ.size() > 0) {
+                    std::string filename = workQ.pop_front();
+                    // 4a&b. lookup dependencies and invoke 'process'
+                    thread->signal();
+                    process(filename.c_str(), theTable.getValue(filename));
+                } else {
+                    thread->signal();
+                    break;
+                }
+            }
+            tracker->signal_done();
+            int i = workQ.size();
+        })));
+    }
 
-        if (theTable.find(filename) == theTable.end()) {
-            fprintf(stderr, "Mismatch between table and workQ\n");
-            return -1;
+    tracker.wait_done();
+    for (auto& thread : threads) {
+        if (thread.joinable()) {
+            thread.join();
         }
-
-        // 4a&b. lookup dependencies and invoke 'process'
-        process(filename.c_str(), theTable.getValue(filename));
     }
 
     // 5. for each file argument
