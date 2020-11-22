@@ -208,7 +208,6 @@ struct MapSafe {
 struct BinarySemaphore {
    private:
     int val;
-    bool dataReady;
     std::condition_variable cv;
     std::mutex mutex;
 
@@ -310,18 +309,18 @@ static void process(const char* file, std::list<std::string>* ll) {
         }
         *q = '\0';
         // 2bii. append file name to dependency list
-        //bs.wait();
+        bs.wait();
         ll->push_back({name});
         // 2bii. if file name not already in table ...
         if (theTable.find(name) != theTable.end()) {
-            //bs.signal();
+            bs.signal();
             continue;
         }
         // ... insert mapping from file name to empty list in table ...
         theTable.insert({name, {}});
         // ... append file name to workQ
         workQ.push_back(name);
-        //bs.signal();
+        bs.signal();
     }
     // 3. close file
     fclose(fd);
@@ -421,7 +420,7 @@ int main(int argc, char* argv[]) {
 
     // 4. for each file on the workQ
     for (int i = 0; i < number_of_threads; i++) {
-        threads.push_back(std::move(std::thread([tracker = &tracker, thread = &threadlock]() {
+        threads.push_back(std::thread([tracker = &tracker, thread = &threadlock]() {
             while (true) {
                 thread->wait();
                 if (workQ.size() > 0) {
@@ -435,8 +434,7 @@ int main(int argc, char* argv[]) {
                 }
             }
             tracker->signal_done();
-            int i = workQ.size();
-        })));
+        }));
     }
 
     tracker.wait_done();

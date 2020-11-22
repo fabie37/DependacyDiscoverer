@@ -16,7 +16,12 @@
             ],
             "stopAtEntry": false,
             "cwd": "${workspaceFolder}/test/",
-            "environment": [],
+            "environment": [
+                {
+                    "name": "CRAWLER_THREADS",
+                    "value": "1"
+                }
+            ],
             "externalConsole": false,
             "MIMode": "gdb",
             "setupCommands": [
