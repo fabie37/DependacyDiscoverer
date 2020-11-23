@@ -1,4 +1,10 @@
 /*
+ * Fabrizio Catinella
+ * 2322021C
+ * SP Exercise 2
+ * 
+ * This is my own work as defined in the Academic Ethics Agreement I have signed.
+ * 
  * usage: ./dependencyDiscoverer [-Idir] ... file.c|file.l|file.y ...
  *
  * processes the c/yacc/lex source file arguments, outputting the dependencies
@@ -153,7 +159,7 @@ struct QueueSafe {
     std::string pop_front() {
         std::unique_lock<std::mutex> lock(mutex);
         if (this->q.empty() == true) {
-            return NULL;
+            return std::string("");
         } else {
             std::string s = this->q.front();
             this->q.pop_front();
@@ -193,6 +199,15 @@ struct MapSafe {
         return this->map.end();
     }
 
+    bool inMap(std::string s) {
+        std::unique_lock<std::mutex> lock(mutex);
+        if (this->map.find(s) == this->map.end()) {
+            return true;
+        } else {
+            return false;
+        }
+    }
+
     void insert(std::pair<std::string, std::list<std::string>> pair) {
         std::unique_lock<std::mutex> lock(mutex);
         this->map.insert(pair);
@@ -204,41 +219,9 @@ struct MapSafe {
     }
 };
 
-// Semaphore
-struct BinarySemaphore {
-   private:
-    int val;
-    std::condition_variable cv;
-    std::mutex mutex;
-
-   public:
-    BinarySemaphore() {
-        this->val = 1;
-    }
-
-    void wait() {
-        std::unique_lock<std::mutex> lock(mutex);
-        while (this->val <= 0) {
-            this->cv.wait(lock);
-        }
-        this->val--;
-    }
-
-    void signal() {
-        std::unique_lock<std::mutex> lock(mutex);
-        while (this->val > 0) {
-            this->cv.wait(lock);
-        }
-        this->val++;
-        lock.unlock();
-        this->cv.notify_one();
-    }
-};
-
 std::vector<std::string> dirs;
 MapSafe theTable;
 QueueSafe workQ;
-BinarySemaphore bs;
 
 std::string dirName(const char* c_str) {
     std::string s = c_str;  // s takes ownership of the string content by allocating memory for it
@@ -309,18 +292,15 @@ static void process(const char* file, std::list<std::string>* ll) {
         }
         *q = '\0';
         // 2bii. append file name to dependency list
-        bs.wait();
         ll->push_back({name});
         // 2bii. if file name not already in table ...
-        if (theTable.find(name) != theTable.end()) {
-            bs.signal();
+        if (!theTable.inMap(name)) {
             continue;
         }
         // ... insert mapping from file name to empty list in table ...
         theTable.insert({name, {}});
         // ... append file name to workQ
         workQ.push_back(name);
-        bs.signal();
     }
     // 3. close file
     fclose(fd);
@@ -370,7 +350,6 @@ int main(int argc, char* argv[]) {
     // init. setup threads, locks and condition variables
     std::vector<std::thread> threads;
     ThreadTracker tracker(number_of_threads);
-    BinarySemaphore threadlock;
 
     // determine the number of -Idir arguments
     int i;
@@ -420,16 +399,13 @@ int main(int argc, char* argv[]) {
 
     // 4. for each file on the workQ
     for (int i = 0; i < number_of_threads; i++) {
-        threads.push_back(std::thread([tracker = &tracker, thread = &threadlock]() {
+        threads.push_back(std::thread([tracker = &tracker]() {
             while (true) {
-                thread->wait();
-                if (workQ.size() > 0) {
-                    std::string filename = workQ.pop_front();
+                auto filename = workQ.pop_front();
+                if (!filename.empty()) {
                     // 4a&b. lookup dependencies and invoke 'process'
-                    thread->signal();
                     process(filename.c_str(), theTable.getValue(filename));
                 } else {
-                    thread->signal();
                     break;
                 }
             }

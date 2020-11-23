@@ -9,7 +9,13 @@ with open("test_results.txt", 'r') as f:
     for line in f:
         if line.startswith(thread_line):
             thread_number = int(line.split(" ")[2])
+            experiment_iter_numb = 0
+        elif line == "\n":
+            pass
+        else:
+            experiment_iter_numb += 1
 max_threads = thread_number
+
 
 # Results Array[row][col]
 # row: thread_number
@@ -37,13 +43,13 @@ with open("test_results.txt", 'r') as f:
                 results[thread_number][1] = float(medians[1])
                 results[thread_number][2] = float(medians[2])
                 thread_number = int(line.split(" ")[2]) - 1
-                sub = np.zeros((3, 3), dtype=float)
+                sub = np.zeros((experiment_iter_numb, 3), dtype=float)
                 experiment_numb = 0
         elif line == '\n':
             pass
         else:
             if sub is None:
-                sub = np.zeros((3, 3),  dtype=float)
+                sub = np.zeros((experiment_iter_numb, 3),  dtype=float)
             exp_sub = line.strip().split(" ")
             sub[experiment_numb][0] = float(exp_sub[1][-6:-1])
             sub[experiment_numb][1] = float(exp_sub[3][-6:-1])
